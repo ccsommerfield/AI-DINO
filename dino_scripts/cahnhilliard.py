@@ -1,3 +1,10 @@
+from config import torch, np, device, dtype
+
+import torch.nn as nn
+import numpy as np
+from typing import Dict
+from ode import ODE
+
 class CahnHilliard(ODE):
     """
     The Cahn-Hilliard equation is a fourth-order partial differential equation
@@ -14,7 +21,7 @@ class CahnHilliard(ODE):
     Attributes
     ----------
     N : int
-        Grid size for the 2D spatial domain (N x N grid). Default is 128.
+        Grid size for the 3D spatial domain (N x N grid). Default is 128.
     L : float
         Physical length of the square domain. Default is 2.0.
     D : float
@@ -51,11 +58,30 @@ class CahnHilliard(ODE):
 
         # Five-point stencil for the 2D Laplace operator ∇²
         h = self.L / self.N
+        '''
         stencil = (1./h) ** 2 * torch.tensor([[[[0,1,0.],
                                                 [1,-4,1],
                                                 [0,1,0]]]], dtype=self.dtype)
+
+        '''
+        stencil = (1./h) ** 2 * torch.tensor(
+            [[[
+                [[0., 0., 0.],
+                 [0., 1., 0.],
+                 [0., 0., 0.]],
+                
+                [[0., 1., 0.],
+                 [1., -6., 1.],
+                 [0., 1., 0.]],
+
+                [[0., 0., 0.],
+                 [0., 1., 0.],
+                 [0., 0., 0.]]
+            ]]],
+            dtype=self.dtype
+        )
         
-        self.laplacian = nn.Conv2d(1, 1, stencil.shape[-1], bias=False, padding='same', padding_mode='circular')
+        self.laplacian = nn.Conv3d(1, 1, stencil.shape[-1], bias=False, padding='same', padding_mode='circular')
         self.laplacian.weight = nn.Parameter(stencil, requires_grad=False)
             
     def init_state(self, M=1, seed=12, sigma=0.01):
@@ -74,10 +100,11 @@ class CahnHilliard(ODE):
         Returns
         -------
         torch.Tensor
-            Initial state tensor of shape (M, N*N).
+            Initial state tensor of shape (M, N*N*N).
         """
         torch.manual_seed(seed)
-        return sigma * torch.randn((M, 1, self.N, self.N), dtype=self.dtype).flatten(start_dim=-2) 
+        u = sigma * torch.randn((M, 1, self.N, self.N, self.N), dtype=self.dtype)
+        return u.reshape(M,-1)
         
     def forward(self, t, c):
         """
@@ -100,5 +127,5 @@ class CahnHilliard(ODE):
             Time derivative dc/dt with same shape as input c, representing
             the rate of change according to the Cahn-Hilliard dynamics.
         """
-        c = c.view(-1, 1, self.N, self.N)
-        return -0.5 * self.D * self.laplacian(c - c ** 3 + self.g * self.laplacian(c)).flatten(start_dim=-2)
+        c = c.view(-1, 1, self.N, self.N, self.N)
+        return -0.5 * self.D * self.laplacian(c - c ** 3 + self.g * self.laplacian(c)).reshape(c.size(0), -1)

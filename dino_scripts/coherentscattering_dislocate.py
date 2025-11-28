@@ -207,15 +207,18 @@ class CoherentScattering_dislocate:
                 u_avg_masked = u_avg
         else:
             mask_bool = self.bool_mask(d, shape_mask, r_out, start_coord, end_coord).squeeze(-1).cpu()
-            supercell_positions_masked = supercell_positions[mask_bool]
+            #supercell_positions_masked = supercell_positions*mask_bool
+            supercell_positions_masked = supercell_positions[mask_bool] #-- > orig
 
+            '''
             if model == 'Swarmalators':
        
                 u_comp =  Dynamic_Motion(self.crystal, device, index, dtype)
                 vals = u_comp.solve(Swarmalators, args, d, tf, dt) 
                 u_avg = vals[..., :3] * scale                                             # [time_steps ,n_supercells, n_atoms, 3]
                 u_avg_masked = u_avg[:, mask_bool, :, :]
-            elif model == 'Random':
+            '''
+            if model == 'Random':
                 t = 15
                 w = 2*np.pi
                 time_l = []
@@ -232,11 +235,13 @@ class CoherentScattering_dislocate:
                     )
                 u_avg = u.mean(dim=(2, 4, 6))                                                       # [t,sx, sy, sz, n_atoms, 3]
                 u_avg = u_avg.reshape(t,-1, n_atoms, 3)                                               # [t,n_supercells, n_atoms, 3]
-                u_avg_masked = u_avg[:, mask_bool, :, :]
+                u_avg_masked = u_avg[:, mask_bool, :, :] #--> orig
+                #u_avg_masked = u_avg * mask_bool.view(1, -1, 1, 1)
             else:
                 motion = Dynamic_Motion(self.crystal, device, index, dtype)
                 u_avg = motion.manual_input(disp=model, d = d, index = index) * scale     # model = disp  [time_steps ,n_supercells, n_atoms, 3]
-                u_avg_masked = u_avg[:, mask_bool, :, :]
+                #u_avg_masked = u_avg[:, mask_bool, :, :] --> changed out of indexing
+                u_avg_masked = u_avg * mask_bool.view(1, -1, 1, 1)
 
         #This is our r_m comp
        

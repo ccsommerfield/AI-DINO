@@ -40,9 +40,9 @@ class CoherentScattering_dislocate:
 
         
         if shape_mask == 'circle':
-            center_i = (n1 - 1) / 2 / d1
-            center_j = (n2 - 1) / 2 / d2
-            center_k = (n3 - 1) / 2 / d3
+            center_i = (n1 - 1) / 2 
+            center_j = (n2 - 1) / 2 
+            center_k = (n3 - 1) / 2 
 
             dist_from_center = torch.sqrt((i - center_i) ** 2 + 
                                           (j - center_j) ** 2 + 
@@ -61,7 +61,7 @@ class CoherentScattering_dislocate:
                 (supercell_positions[:, 2] >= z0) & (supercell_positions[:, 2] < z1)
             )
             
-            mask_bool = mask_bool.to(cpu)
+            mask_bool = mask_bool.flatten().to(device)
 
         elif shape_mask == 'combo':
             mask_rect = torch.zeros((n1, n2, n3), dtype=torch.bool, device=device)
@@ -145,10 +145,10 @@ class CoherentScattering_dislocate:
                 # Apply mask to positions
             supercell_positions_masked = supercell_positions[mask_bool]
         '''
-        mask_bool = torch.ones(supercell_positions.shape[0], dtype=torch.bool, device='cpu')
+        mask_bool = torch.ones(supercell_positions.shape[0], dtype=torch.bool, device= device)
         
         if shape_mask is None or shape_mask is False:
-            supercell_positions_masked = supercell_positions
+            #supercell_positions_masked = supercell_positions
             if model == 'Swarmalators':
 
                 u_comp =  Dynamic_Motion(self.crystal, device, index, dtype)
@@ -180,7 +180,7 @@ class CoherentScattering_dislocate:
         else:
             mask_bool = self.bool_mask(d, shape_mask, r_out, start_coord, end_coord).squeeze(-1)
             #mask_bool = mask_bool.to(device='cpu', dtype=torch.bool)
-            supercell_positions_masked = supercell_positions * mask_bool.unsqueeze(dim=1)
+            #supercell_positions_masked = supercell_positions * mask_bool.unsqueeze(dim=1)
 
             if model == 'Random':
                 t = 15
@@ -200,12 +200,12 @@ class CoherentScattering_dislocate:
                 u_avg = u.mean(dim=(2, 4, 6))                                                       # [t,sx, sy, sz, n_atoms, 3]
                 u_avg = u_avg.reshape(t,-1, n_atoms, 3)                                               # [t,n_supercells, n_atoms, 3]
                 #u_avg_masked = u_avg[:, mask_bool, :, :]
-                u_avg_masked = u_avg * mask_bool.view(1, -1, 1, 1)
+                #u_avg_masked = u_avg * mask_bool.view(1, -1, 1, 1)
             else:
                 motion = Dynamic_Motion(self.crystal, device, index, dtype)
                 u_avg = motion.manual_input(disp=model, d = d, index = index) * scale     # model = disp  [time_steps ,n_supercells, n_atoms, 3]
                 #u_avg_masked = u_avg[:, mask_bool, :, :]
-                u_avg_masked = u_avg * mask_bool.view(1, -1, 1, 1)
+                #u_avg_masked = u_avg * mask_bool.view(1, -1, 1, 1)
 
         #This is our r_m comp
        
@@ -220,7 +220,7 @@ class CoherentScattering_dislocate:
         
         
         r = r_m[None, None, :, :]                                                     # [1, 1, n_atoms, 3]
-        u = u_avg_masked ##Updated for mask                                           # [steps, n_supercells_masked, n_atoms, 3]
+        u = u_avg ##Updated for mask                                           # [steps, n_supercells_masked, n_atoms, 3]
         t_step = u.shape[0]
 
         #Summing the m dependant components
@@ -231,12 +231,17 @@ class CoherentScattering_dislocate:
         q_dot_m = torch.einsum('bi,tsai->tbsa',q_vectors_flat, m_dep_pos)            # [time_steps, batch_size, n_supercells_masked, n_atoms]
        
         m_dep_phase = torch.exp(-1j*q_dot_m)
-        m_structure_factor = f_q * m_dep_phase
+        '''
+        mask_bool = self.bool_mask(d, shape_mask, r_out, start_coord, end_coord)
+            
+            phase_R = torch.exp(-1j * dot_prod_R) * mask_bool.unsqueeze(dim = 0)
+        '''
+        m_structure_factor = f_q * m_dep_phase #*mask
 
-        m_sum = torch.sum(m_structure_factor, dim = -1)                              # [batch_size, n_supercells_masked]
+        m_sum = torch.sum(m_structure_factor, dim = -1) * mask_bool.unsqueeze(dim = 0)  # [batch_size, n_supercells_masked]
 
         with torch.no_grad():
-            q_dot_R = torch.matmul(q_vectors_flat, supercell_positions_masked.T)     #[batch_size, n_supercells_masked]
+            q_dot_R = torch.matmul(q_vectors_flat, supercell_positions.T)     #[batch_size, n_supercells_masked]
             #q_dot_R = torch.matmul(q_vectors_flat, torch.matmul(supercell_indices, self.crystal.lattice_vectors).T)
         
             R_phase = torch.exp(-1j * q_dot_R)
