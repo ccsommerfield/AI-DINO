@@ -1,4 +1,4 @@
-from config import torch, np
+from config import torch, np, device, dtype
 import math
 from torch import Tensor
 import torch.nn as nn
@@ -14,7 +14,7 @@ class ODE(nn.Module):
         self.adjoint = adjoint if requires_grad else False
         self.odeint = odeint_adjoint if self.adjoint else odeint
         self.dtype = dtype
-
+    
 
     def solve(self, t, y0, device='cpu', rtol=1e-7, atol=1e-9):
         if self.training:
@@ -23,7 +23,8 @@ class ODE(nn.Module):
         else:
             with torch.no_grad():
                 return odeint(self.to(device), y0.to(device), t.to(device), method=self.method,
-                              rtol=rtol, atol=atol, options={'dtype':self._dtype})
+                              rtol=rtol, atol=atol, options={'dtype':self.dtype})
+##CHILL
                 
     def get_batch(self, t, y, batch_time, batch_size):
         """
@@ -52,7 +53,7 @@ class ODE(nn.Module):
         y_batch : torch.Tensor
             Batch trajectory data. Shape: (batch_time, batch_size, D).
         """
-        '''
+        
         T, M = y.shape[:2]
         t_batch = t[:batch_time]
     
@@ -76,13 +77,14 @@ class ODE(nn.Module):
             
             # Extract initial conditions
             y0_batch = y[time_indices, traj_indices]
+
             
             # Extract trajectory subsequences
             batch_indices = torch.arange(batch_time)[:, None] + torch.tensor(time_indices)[None, :]
             y_batch = y[batch_indices, traj_indices]
         
         return t_batch, y0_batch, y_batch
-        '''
+    '''
 
     def get_batch(self, t, y0, y, batch_time, batch_size):
         T, M = y.shape[:2]
@@ -101,7 +103,9 @@ class ODE(nn.Module):
                 y_batch = torch.cat((y_batch,
                     torch.stack([y[b[i][0]+j, b[i][1]] for j in range(batch_time)], dim=0)[:,None,:]), dim=1)
         return t_batch, y0_batch, y_batch
-
-
+    
+     
 
 # swarm.solve will return a tensor of shape [n_steps, N, 4]
+    '''
+

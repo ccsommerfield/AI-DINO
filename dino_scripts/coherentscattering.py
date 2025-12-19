@@ -120,17 +120,17 @@ class CoherentScattering:
 
         elif shape_mask == 'chill':
             mask_bool = chill 
-            s1, s2, s3 = chill.shape
-            mask_bool.view(s1,s2,n1,n2,n3) #shape is (batch_size, channels, n1, n2, n3)
-            b, c = mask_bool.shape[:2]
+            s1, s2, s3, nt = chill.shape
+            mask_bool = mask_bool.view(-1,n1,n2,n3) #shape is (init_cond * time * channel, n1, n2, n3)
+            b = mask_bool.shape[0]
             mask_bool = mask_bool.reshape(
-                b, c,
+                b,
                 n1 // d1, d1,
                 n2 // d2, d2,
                 n3 // d3, d3)
             
-            mask_bool = mask_bool.mean(dim=(3,5,7))  # Might not work well for bool. (batch, channel, nx/dx, ny/dy, nz/dz)
-            mask_bool = mask_bool.view(s1,s2, -1).to(device) 
+            mask_bool = mask_bool.mean(dim=(2,4,6))  # Might not work well for bool. (batch, channel, nx/dx, ny/dy, nz/dz)
+            mask_bool = mask_bool.view(b, -1).to(device) #(init_cond * time * channel, nx/dx * ny/dy * nz/dz)
 
             
 
@@ -138,6 +138,7 @@ class CoherentScattering:
             mask_bool = torch.ones((n1 * n2 * n3,), dtype=torch.bool, device=device).unsqueeze(-1)
 
         return mask_bool
+
 
 
     def calculate_structure_factor(self) -> Tensor:
@@ -272,17 +273,18 @@ class CoherentScattering:
 
         '''
         if shape_mask == 'chill': #--> will need to change this to fit as well. Should just be the same final R value
+            s1, s2, s3, nt = chill.shape
+            
             mask_bool = self.bool_mask(d, shape_mask, chill = chill)
             dot_prod_R = torch.matmul(q_vectors_flat, supercell_positions.T)
             
-            phase_R = torch.exp(-1j * dot_prod_R).unsqueeze(dim=0).unsqueeze(dim=1)  * mask_bool.unsqueeze(dim = 2)
+            phase_R = torch.exp(-1j * dot_prod_R).unsqueeze(dim=0)  * mask_bool.unsqueeze(dim = 1)
 
-            R_comp = torch.sum(phase_R, dim=3)
-            d_0,d_1,_ = R_comp.shape
+            R_comp = torch.sum(phase_R, dim=2)
+            #d_0,d_1,_ = R_comp.shape
             d_2, d_3 = batch_size_original
-
-            final_R = R_comp.view(d_0,d_1,d_2,d_3)*d1*d2*d3 #(batch, channel, batch_size_original)
-
+            
+            final_R = R_comp.view(s1,s2,s3,d_2,d_3)*d1*d2*d3 #(batch, time, channel, batch_size_original)
             return(final_R) 
         if shape_mask == None:
             dot_prod_R = torch.matmul(q_vectors_flat, supercell_positions.T)
@@ -338,7 +340,7 @@ class CoherentScattering:
 
         q = self.q_vectors
 
-        A = self.R_sum(d, shape_mask, r_out, start_coord, end_coord, chill) *self.calculate_structure_factor().unsqueeze(dim=0).unsqueeze(dim=0)*self.global_phase_factor().unsqueeze(dim=0).unsqueeze(dim=0)
+        A = self.R_sum(d, shape_mask, r_out, start_coord, end_coord, chill) *self.calculate_structure_factor().unsqueeze(dim=0).unsqueeze(dim=0).unsqueeze(dim=0)*self.global_phase_factor().unsqueeze(dim=0).unsqueeze(dim=0).unsqueeze(dim=0)
         return A.abs()**2
          
     def get_intensity(self,d,shape_mask = None, r_out = None, start_coord = None, end_coord = None):
@@ -352,6 +354,12 @@ class CoherentScattering:
         q = self.q_vectors
 
         A = self.R_sum(d, shape_mask, r_out, start_coord, end_coord)*self.calculate_structure_factor()*self.global_phase_factor()
+        return A
+    def get_amplitude_chill(self,d,chill,shape_mask = 'chill', r_out = None, start_coord = None, end_coord = None):
+
+        q = self.q_vectors
+
+        A = self.R_sum(d, shape_mask, r_out, start_coord, end_coord, chill) *self.calculate_structure_factor().unsqueeze(dim=0).unsqueeze(dim=0).unsqueeze(dim=0)*self.global_phase_factor().unsqueeze(dim=0).unsqueeze(dim=0).unsqueeze(dim=0)
         return A
 
     '''

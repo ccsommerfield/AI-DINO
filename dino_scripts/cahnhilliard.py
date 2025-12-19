@@ -28,13 +28,13 @@ class CahnHilliard(ODE):
         Diffusion coefficient controlling the rate of evolution. Default is 1e-4.
     g: float
         Gradient energy coefficient controlling the length of transition regions between the domains. Default is 1e-4.
-    laplacian : torch.nn.Conv2d
+    laplacian : torch.nn.Conv3d
         Convolutional layer implementing the discrete Laplace operator
         with periodic boundary conditions.
     """
     def __init__(self, args, method='dopri5', dtype=torch.float32):
         """
-        Initialize the 2D Cahn Hilliard model with specified parameters.
+        Initialize the 3D Cahn Hilliard model with specified parameters.
         
         Parameters
         ----------
@@ -104,7 +104,7 @@ class CahnHilliard(ODE):
         """
         torch.manual_seed(seed)
         u = sigma * torch.randn((M, 1, self.N, self.N, self.N), dtype=self.dtype)
-        return u.reshape(M,-1)
+        return u.flatten(start_dim=-3)
         
     def forward(self, t, c):
         """
@@ -128,4 +128,5 @@ class CahnHilliard(ODE):
             the rate of change according to the Cahn-Hilliard dynamics.
         """
         c = c.view(-1, 1, self.N, self.N, self.N)
-        return -0.5 * self.D * self.laplacian(c - c ** 3 + self.g * self.laplacian(c)).reshape(c.size(0), -1)
+
+        return -0.5 * self.D * self.laplacian(c - c ** 3 + self.g * self.laplacian(c)).flatten(start_dim=-3)
