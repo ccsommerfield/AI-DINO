@@ -10,12 +10,13 @@ from config import torch, np, device, dtype
 from torch import Tensor
 
 class CoherentScattering:
-    def __init__(self, crystal, K_i, K_f, detector, dtype=dtype, device=device):
+    def __init__(self, crystal, K_i, K_f, b_size, detector, dtype=dtype, device=device):
         self.K_i = K_i
         self.K_f = K_f
         self.detector = detector
         self.q_vectors = self.detector.get_q(K_i,K_f)
         self.crystal = crystal
+        self.b_size = b_size
     
     #def animate_displacemet(self):
         #start with a cos function that evolves with time
@@ -118,19 +119,25 @@ class CoherentScattering:
             mask_bool = (mask_rect | mask_circle).flatten().unsqueeze(-1)
             '''
 
-        elif shape_mask == 'chill':
+        elif shape_mask == 'chill': ## add a shape check and if it's at supercell res you dont have to reshape
             mask_bool = chill 
-            s1, s2, s3, nt = chill.shape
-            mask_bool = mask_bool.view(-1,n1,n2,n3) #shape is (init_cond * time * channel, n1, n2, n3)
-            b = mask_bool.shape[0]
-            mask_bool = mask_bool.reshape(
-                b,
-                n1 // d1, d1,
-                n2 // d2, d2,
-                n3 // d3, d3)
+            if chill.shape[-1] == n1 * n2 * n3:
+                s1, s2, s3, nt = chill.shape
+                mask_bool = mask_bool.view(-1,n1,n2,n3) #shape is (init_cond * time * channel, n1, n2, n3)
+                b = mask_bool.shape[0]
+                mask_bool = mask_bool.reshape(
+                    b,
+                    n1 // d1, d1,
+                    n2 // d2, d2,
+                    n3 // d3, d3)
             
-            mask_bool = mask_bool.mean(dim=(2,4,6))  # Might not work well for bool. (batch, channel, nx/dx, ny/dy, nz/dz)
-            mask_bool = mask_bool.view(b, -1).to(device) #(init_cond * time * channel, nx/dx * ny/dy * nz/dz)
+                mask_bool = mask_bool.mean(dim=(2,4,6))  # Might not work well for bool. (batch, channel, nx/dx, ny/dy, nz/dz)
+                mask_bool = mask_bool.view(b, -1).to(device) #(init_cond * time * channel, nx/dx * ny/dy * nz/dz)
+            else:
+                s1, s2, s3, nt = chill.shape
+                mask_bool = mask_bool.view(-1,n1//d1,n2//d2,n3//d3) #shape is (init_cond * time * channel, n1, n2, n3)
+                b = mask_bool.shape[0]
+                mask_bool = mask_bool.view(b, -1).to(device) #(init_cond * time * channel, nx/dx * ny/dy * nz/dz)
 
             
 
@@ -214,52 +221,7 @@ class CoherentScattering:
             # Calculate positions in real space --> this is R_nd
 
         supercell_positions = torch.matmul(supercell_indices, self.crystal.lattice_vectors) ## full grid of R_nd
-        '''
-        if shape_mask == None:
-            supercell_positions_masked = supercell_positions ## full grid of R_nd
-
-        elif shape_mask is False:
-            supercell_positions_masked = supercell_positions ## full grid of R_nd
-            
-        elif shape_mask == 'chill':
-            mask_bool = self.bool_mask(d, shape_mask, r_out, start_coord, end_coord, chill).flatten(start_dim=2) #(batch,channel,sup_x*sup_y*sup_z)
-            supercell_positions_masked = supercell_positions.unsqueeze(dim=0).unsqueeze(dim=0) * mask_bool.unsqueeze(dim=3) #(batch,channel,sup_x*sup_y*sup_z,3)
-
-        else:
-            mask_bool = self.bool_mask(d, shape_mask, r_out, start_coord, end_coord)
-            # Apply mask to positions
-            #supercell_positions_masked = supercell_positions[mask_bool] --> changed from indexing
-            supercell_positions_masked = supercell_positions * mask_bool.unsqueeze(dim=1)
-        '''
-        
-        '''
-        if shape_mask is None:
-            supercell_positions = torch.matmul(supercell_indices, self.crystal.lattice_vectors)
-            
-        else:
-            center_i = (n1 - 1) / 2
-            center_j = (n2 - 1) / 2
-            center_k = (n3 - 1) / 2
-
-            # Downsampled center
-            center_i /= d1
-            center_j /= d2
-            center_k /= d3
-
-
-            # Compute distance from center for each grid point
-            dist_from_center = torch.sqrt((i - center_i) ** 2 + (j - center_j) ** 2 + (k - center_k) ** 2)
-
-            
-
-            mask = (dist_from_center < r_out).to(dtype=dtype)  # [n1, n2, n3]
-            mask = mask.flatten().unsqueeze(-1)  # [n1, n2, n3, 1]
-
-        
-            supercell_positions = supercell_positions * mask  # [n1, n2, n3, 3]
-        '''
-            
-
+      
             # Resizing q
     
         batch_size_original = self.q_vectors.shape[:-1]
@@ -276,37 +238,54 @@ class CoherentScattering:
             s1, s2, s3, nt = chill.shape
             
             mask_bool = self.bool_mask(d, shape_mask, chill = chill)
-            dot_prod_R = torch.matmul(q_vectors_flat, supercell_positions.T)
+            r_vals = []
+            for i in range(0, q_vectors_flat.shape[0], self.b_size):
+                q_vec_batch = q_vectors_flat[i:i+self.b_size]
+                #mask_batch = mask_bool[i:i+self.b_size]
+                dot_prod_R = torch.matmul(q_vec_batch, supercell_positions.T)
             
-            phase_R = torch.exp(-1j * dot_prod_R).unsqueeze(dim=0)  * mask_bool.unsqueeze(dim = 1)
+                phase_R = torch.exp(-1j * dot_prod_R).unsqueeze(dim=0)  * mask_bool.unsqueeze(dim = 1)
 
-            R_comp = torch.sum(phase_R, dim=2)
-            #d_0,d_1,_ = R_comp.shape
-            d_2, d_3 = batch_size_original
+                R_comp = torch.sum(phase_R, dim=2)
+                #print(R_comp.shape)
+                #d_0,d_1,_ = R_comp.shape
+                d_2, d_3 = batch_size_original
+                r_vals.append(R_comp)
+            R_comp = torch.cat(r_vals, dim = 1)
             
             final_R = R_comp.view(s1,s2,s3,d_2,d_3)*d1*d2*d3 #(batch, time, channel, batch_size_original)
             return(final_R) 
         if shape_mask == None:
-            dot_prod_R = torch.matmul(q_vectors_flat, supercell_positions.T)
+            r_vals = []
+            for i in range(0, q_vectors_flat.shape[0], self.b_size):
+                q_vec_batch = q_vectors_flat[i:i+self.b_size]
+                dot_prod_R = torch.matmul(q_vec_batch, supercell_positions.T)
 
                 # Finding the exponential component
 
-            phase_R = torch.exp(-1j * dot_prod_R)
+                phase_R = torch.exp(-1j * dot_prod_R)
 
-            R_comp = torch.sum(phase_R, dim=1)
-
+                R_comp = torch.sum(phase_R, dim=1)
+                r_vals.append(R_comp)
+            R_comp = torch.cat(r_vals, dim = 0)
             final_R = R_comp.view(batch_size_original)*d1*d2*d3
 
             return(final_R) 
         else:
-            mask_bool = self.bool_mask(d, shape_mask, r_out, start_coord, end_coord)
-            dot_prod_R = torch.matmul(q_vectors_flat, supercell_positions.T)
+            r_vals = []
+            for i in range(0, q_vectors_flat.shape[0], self.b_size):
+                mask_bool = self.bool_mask(d, shape_mask, r_out, start_coord, end_coord)
+                q_vec_batch = q_vectors_flat[i:i+self.b_size]
+                #mask_batch = mask_bool[i:i+self.b_size]
+                dot_prod_R = torch.matmul(q_vec_batch, supercell_positions.T)
 
                 # Finding the exponential component
 
-            phase_R = torch.exp(-1j * dot_prod_R) * mask_bool.unsqueeze(dim = 0)
+                phase_R = torch.exp(-1j * dot_prod_R) * mask_bool.unsqueeze(dim = 0)
 
-            R_comp = torch.sum(phase_R, dim=1)
+                R_comp = torch.sum(phase_R, dim=1)
+                r_vals.append(R_comp)
+            R_comp = torch.cat(r_vals, dim = 0)
 
             final_R = R_comp.view(batch_size_original)*d1*d2*d3
 
