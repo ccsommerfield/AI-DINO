@@ -369,3 +369,39 @@ class CoherentScattering:
         
         return(S.abs()**2 * N**2 / R**2)
 
+    def G_2(self,Inten):
+        G2_l = []
+        ntime, nbatch, n2, nx, ny = Inten.shape
+        r_in_l=np.linspace(0,nx//2-5,10, dtype = int)
+        i, j = torch.meshgrid(torch.arange(nx), torch.arange(ny), indexing="ij")
+        center_i = (nx - 1) / 2 
+        center_j = (ny - 1) / 2 
+        for obj in r_in_l:
+            r_in = obj
+            r_o = obj + 5
+
+            dist_from_center = torch.sqrt((i - center_i) ** 2 + 
+                                      (j - center_j) ** 2 )
+
+            mask_annular = (dist_from_center >= r_in) & (dist_from_center <= r_o)
+            #print(I.shape, mask_annular.shape)
+            I = Inten.view(ntime,nbatch,-1) #this gives I in numb frames by batch size by numb pixles
+            I = I[:,:, mask_annular.flatten()]
+            I_flat = I.reshape(ntime, -1)
+            I_avg = I_flat.mean(dim=1)
+            I_fluc = I_flat - I_avg[:, None] 
+            I_std = I_fluc.pow(2).mean(dim=1).sqrt()
+            C_num = (I_fluc @ I_fluc.T) / I_fluc.shape[1]
+            C_den = I_std[:, None] * I_std[None, :] + 1e-8
+            C = C_num / C_den
+            G2_l.append(C)
+            '''
+            D = I_flat.shape[1]
+            mean_I = I_flat.mean(dim=1)
+            G2 = (I_flat @ I_flat.T / D) / (mean_I[:, None] * mean_I[None, :]) #averaged over batches now too
+            #I_prod = I_flat @ I_flat.T
+            #G2 = (I_prod * n[:, None])* n[None, :]
+            G2_l.append(G2)
+            '''
+        return G2_l
+
